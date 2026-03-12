@@ -142,8 +142,6 @@ install_singbox(){
       aarch64) arch="arm64" ;;
       armv7l) arch="armv7" ;;
     esac
-    # latest_version_tag=$(curl -s "https://api.github.com/repos/SagerNet/sing-box/releases" | grep -Po '"tag_name": "\K.*?(?=")' | sort -V | tail -n 1)
-    # latest_version=${latest_version_tag#v}
     echo "最新版本为: $latest_version"
     package_name="sing-box-${latest_version}-linux-${arch}"
     url="https://github.com/SagerNet/sing-box/releases/download/${latest_version_tag}/${package_name}.tar.gz"
@@ -238,12 +236,23 @@ modify_port() {
 # client configuration
 show_client_configuration() {
   server_ip=$(grep -o "SERVER_IP='[^']*'" /root/sbox/config | awk -F"'" '{print $2}')
+  
+  # 如果包含冒号判定为 IPv6，URL 必须加上中括号
+  if [[ "$server_ip" =~ ":" ]]; then
+      server_ip_url="[${server_ip}]"
+  else
+      server_ip_url="${server_ip}"
+  fi
+
   public_key=$(grep -o "PUBLIC_KEY='[^']*'" /root/sbox/config | awk -F"'" '{print $2}')
   reality_port=$(jq -r '.inbounds[] | select(.tag == "vless-in") | .listen_port' /root/sbox/sbconfig_server.json)
   reality_uuid=$(jq -r '.inbounds[] | select(.tag == "vless-in") | .users[0].uuid' /root/sbox/sbconfig_server.json)
   reality_server_name=$(jq -r '.inbounds[] | select(.tag == "vless-in") | .tls.server_name' /root/sbox/sbconfig_server.json)
   short_id=$(jq -r '.inbounds[] | select(.tag == "vless-in") | .tls.reality.short_id[0]' /root/sbox/sbconfig_server.json)
-  reality_link="vless://$reality_uuid@$server_ip:$reality_port?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$reality_server_name&fp=chrome&pbk=$public_key&sid=$short_id&type=tcp&headerType=none#SING-BOX-REALITY"
+  
+  # 这里使用 server_ip_url 防止 IPv6 解析异常
+  reality_link="vless://$reality_uuid@$server_ip_url:$reality_port?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$reality_server_name&fp=chrome&pbk=$public_key&sid=$short_id&type=tcp&headerType=none#SING-BOX-REALITY"
+  
   echo ""
   show_notice "VISION_REALITY 通用链接 二维码 通用参数  https://bandwagonhostserver.com"
   echo ""
@@ -253,7 +262,7 @@ show_client_configuration() {
   echo ""
   info "二维码如下"
   echo ""
-  qrencode -t UTF8 $reality_link
+  qrencode -t UTF8 "$reality_link"
   echo ""
   info "客户端通用参数如下"
   echo "------------------------------------"
@@ -271,15 +280,15 @@ show_client_configuration() {
   hy_password=$(jq -r '.inbounds[] | select(.tag == "hy2-in") | .users[0].password' /root/sbox/sbconfig_server.json)
   ishopping=$(grep '^HY_HOPPING=' /root/sbox/config | cut -d'=' -f2)
   if [ "$ishopping" = "FALSE" ]; then
-      hy2_link="hysteria2://$hy_password@$server_ip:$hy_port?insecure=1&sni=$hy_server_name#SING-BOX-HYSTERIA2"
+      hy2_link="hysteria2://$hy_password@$server_ip_url:$hy_port?insecure=1&sni=$hy_server_name#SING-BOX-HYSTERIA2"
   else
       hopping_range=$(iptables -t nat -L -n -v | grep "udp" | grep -oP 'dpts:\K\d+:\d+' || ip6tables -t nat -L -n -v | grep "udp" | grep -oP 'dpts:\K\d+:\d+')
       if [ -z "$hopping_range" ]; then
           warning "端口跳跃已开启却未找到端口范围。"
-          hy2_link="hysteria2://$hy_password@$server_ip:$hy_port?insecure=1&sni=$hy_server_name#SING-BOX-HYSTERIA2"
+          hy2_link="hysteria2://$hy_password@$server_ip_url:$hy_port?insecure=1&sni=$hy_server_name#SING-BOX-HYSTERIA2"
       else
           formatted_range=$(echo "$hopping_range" | sed 's/:/-/')
-          hy2_link="hysteria2://$hy_password@$server_ip:$hy_port?insecure=1&sni=$hy_server_name&mport=${hy_port},${formatted_range}#SING-BOX-HYSTERIA2"
+          hy2_link="hysteria2://$hy_password@$server_ip_url:$hy_port?insecure=1&sni=$hy_server_name&mport=${hy_port},${formatted_range}#SING-BOX-HYSTERIA2"
       fi
   fi
   echo ""
@@ -292,7 +301,7 @@ show_client_configuration() {
   echo ""
   info "二维码如下"
   echo ""
-  qrencode -t UTF8 $hy2_link  
+  qrencode -t UTF8 "$hy2_link"
   echo ""
   info "客户端通用参数如下"
   echo "------------------------------------"
@@ -342,7 +351,7 @@ dns:
 proxies:        
   - name: Reality
     type: vless
-    server: $server_ip
+    server: "$server_ip"
     port: $reality_port
     uuid: $reality_uuid
     network: tcp
@@ -357,7 +366,7 @@ proxies:
 
   - name: Hysteria2
     type: hysteria2
-    server: $server_ip
+    server: "$server_ip"
     port: $hy_port
     #  up和down均不写或为0则使用BBR流控
     # up: "30 Mbps" # 若不写单位，默认为 Mbps
@@ -417,7 +426,7 @@ cat << EOF
     }
   },
   "dns": {
-    "servers": [
+    "servers":[
       {
         "tag": "proxyDns",
         "address": "https://8.8.8.8/dns-query",
@@ -439,7 +448,7 @@ cat << EOF
     ],
     "rules": [
       {
-        "domain": [
+        "domain":[
           "ghproxy.com",
           "cdn.jsdelivr.net",
           "testingcf.jsdelivr.net"
@@ -472,7 +481,7 @@ cat << EOF
         "server": "proxyDns"
       },
       {
-        "query_type": [
+        "query_type":[
           "A",
           "AAAA"
         ],
@@ -487,7 +496,7 @@ cat << EOF
     "independent_cache": true,
     "strategy": "ipv4_only"
   },
-  "inbounds": [
+  "inbounds":[
     {
       "type": "tun",
       "inet4_address": "172.19.0.1/30",
@@ -513,11 +522,11 @@ cat << EOF
       "users": []
     }
   ],
-    "outbounds": [
+    "outbounds":[
     {
       "tag": "proxy",
       "type": "selector",
-      "outbounds": [
+      "outbounds":[
         "auto",
         "direct",
         "sing-box-reality",
@@ -578,7 +587,7 @@ cat << EOF
     {
       "tag": "auto",
       "type": "urltest",
-      "outbounds": [
+      "outbounds":[
         "sing-box-reality",
         "sing-box-hysteria2"
       ],
@@ -589,7 +598,7 @@ cat << EOF
     {
       "tag": "WeChat",
       "type": "selector",
-      "outbounds": [
+      "outbounds":[
         "direct",
         "sing-box-reality",
         "sing-box-hysteria2"
@@ -598,7 +607,7 @@ cat << EOF
     {
       "tag": "Apple",
       "type": "selector",
-      "outbounds": [
+      "outbounds":[
         "direct",
         "sing-box-reality",
         "sing-box-hysteria2"
@@ -607,7 +616,7 @@ cat << EOF
     {
       "tag": "Microsoft",
       "type": "selector",
-      "outbounds": [
+      "outbounds":[
         "direct",
         "sing-box-reality",
         "sing-box-hysteria2"
@@ -617,7 +626,7 @@ cat << EOF
   "route": {
     "auto_detect_interface": true,
     "final": "proxy",
-    "rules": [
+    "rules":[
       {
         "protocol": "dns",
         "outbound": "dns-out"
@@ -640,7 +649,7 @@ cat << EOF
         "outbound": "proxy"
       },
       {
-        "domain": [
+        "domain":[
           "clash.razord.top",
           "yacd.metacubex.one",
           "yacd.haishan.me",
@@ -677,7 +686,7 @@ cat << EOF
         "outbound": "Microsoft"
       }
     ],
-    "rule_set": [
+    "rule_set":[
       {
         "tag": "geoip-cn",
         "type": "remote",
@@ -1024,7 +1033,7 @@ process_warp(){
                             read -p "请输入要删除的域名关键字（若要删除geosite-openai，输入openai） " keyword_to_delete
                             formatted_keyword="geosite-$keyword_to_delete"
                             if jq --arg formatted_keyword "$formatted_keyword" '.route.rules[0].rule_set | any(. == $formatted_keyword)' /root/sbox/sbconfig_server.json | grep -q "true"; then
-                              jq --arg formatted_keyword "$formatted_keyword" '.route.rules[0].rule_set -= [$formatted_keyword]' /root/sbox/sbconfig_server.json > /root/sbox/sbconfig_server.temp && mv /root/sbox/sbconfig_server.temp /root/sbox/sbconfig_server.json
+                              jq --arg formatted_keyword "$formatted_keyword" '.route.rules[0].rule_set -=[$formatted_keyword]' /root/sbox/sbconfig_server.json > /root/sbox/sbconfig_server.temp && mv /root/sbox/sbconfig_server.temp /root/sbox/sbconfig_server.json
                               #卸载ruleset
                               jq --arg formatted_keyword "$formatted_keyword" 'del(.route.rule_set[] | select(.tag == $formatted_keyword))' /root/sbox/sbconfig_server.json > /root/sbox/sbconfig_server.temp && mv /root/sbox/sbconfig_server.temp /root/sbox/sbconfig_server.json
                               echo "域名关键字已删除: $formatted_keyword"
@@ -1229,19 +1238,19 @@ enable_warp(){
       jq --arg private_key "$private_key" --arg v6 "$v6" --arg reserved "$reserved" --arg warp_out "$warp_out" --arg ipaddress "$ipaddress" --arg tport "$tport" --arg ssipaddress "$ssipaddress" --arg sstport "$sstport" --arg sspwd "$sspwd" '
           .route = {
             "final": "direct",
-            "rules": [
+            "rules":[
               {
                 "rule_set": ["geosite-openai","geosite-netflix"],
                 "outbound": $warp_out
               },
               {
-                "domain_keyword": [
+                "domain_keyword":[
                   "ipaddress"
                 ],
                 "outbound": $warp_out
               }
             ],
-            "rule_set": [
+            "rule_set":[
               { 
                 "tag": "geosite-openai",
                 "type": "remote",
@@ -1257,7 +1266,7 @@ enable_warp(){
                 "download_detour": "direct"
               }
             ]
-          } | .outbounds += [
+          } | .outbounds +=[
             {
               "type": "direct",
               "tag": "warp-IPv4-out",
@@ -1287,7 +1296,7 @@ enable_warp(){
               "tag": "wireguard-out",
               "server": "162.159.192.1",
               "server_port": 2408,
-              "local_address": [
+              "local_address":[
                 "172.16.0.2/32",
                 $v6 + "/128"
               ],
@@ -1363,7 +1372,7 @@ process_doko() {
               tag="direct-in${tag_suffix}"
 
               jq --arg ipaddress "$ipaddress" --arg fport "$fport" --arg tport "$tport" --arg tag "$tag" '
-                  .inbounds += [
+                  .inbounds +=[
                       {
                           "type": "direct",
                           "tag": $tag,
@@ -1429,7 +1438,7 @@ process_dokoko() {
           fi
         done
         jq --arg fport "$fport" --arg fip "$fip" '
-            .inbounds += [
+            .inbounds +=[
                 {   
                     "sniff": true,
                     "sniff_override_destination": true,
@@ -1480,7 +1489,7 @@ process_ssko() {
         info "ss密码为：$sspwd"
         info "本机ip为: $server_ip"
         jq --arg sspwd "$sspwd" --arg fport "$fport" '
-            .inbounds += [
+            .inbounds +=[
                 {   
                     "type": "shadowsocks",
                     "tag": "ss-in",
@@ -1638,7 +1647,7 @@ echo ""
 echo ""
 install_pkgs
 # Check if reality.json, sing-box, and sing-box.service already exist
-if [ -f "/root/sbox/sbconfig_server.json" ] && [ -f "/root/sbox/config" ] && [ -f "/root/sbox/kcswag.sh" ] && [ -f "/usr/bin/kcswag" ] && [ -f "/root/sbox/sing-box" ] && [ -f "/etc/systemd/system/sing-box.service" ]; then
+if [ -f "/root/sbox/sbconfig_server.json" ] && [ -f "/root/sbox/config" ] && [ -f "/root/sbox/kcswag.sh" ] &&[ -f "/usr/bin/kcswag" ] && [ -f "/root/sbox/sing-box" ] &&[ -f "/etc/systemd/system/sing-box.service" ]; then
     echo ""
     warning "sing-box-reality-hysteria2已安装"
     show_status
@@ -1766,8 +1775,48 @@ mkdir -p /root/sbox/self-cert/ && openssl ecparam -genkey -name prime256v1 -out 
 info "自签证书生成完成,保存于/root/sbox/self-cert/"
 echo ""
 echo ""
-#get ip
-server_ip=$(curl -s4m8 ip.sb -k) || server_ip=$(curl -s6m8 ip.sb -k)
+
+#IP 类型选择与检测（支持 IPv4 / IPv6）
+warning "====================================="
+info "请选择VPS服务器用于连接的公网IP类型:"
+info "1. IPv4 (默认推荐)"
+info "2. IPv6 (请确保VPS及本地网络均支持IPv6)"
+warning "====================================="
+read -p "请输入数字[1-2]: " ip_choice
+ip_choice=${ip_choice:-1}
+
+if [ "$ip_choice" == "2" ]; then
+    info "正在通过 API 检测公网 IPv6 地址..."
+    server_ip=$(curl -s6m8 ip.sb -k | sed -n '1p')
+    if [ -z "$server_ip" ]; then
+        # 尝试使用备用 API 测试
+        server_ip=$(curl -s6m8 api6.ipify.org -k | sed -n '1p')
+    fi
+    
+    if [ -z "$server_ip" ]; then
+        warning "自动检测公网 IPv6 失败！"
+        read -p "请手动输入你的 IPv6 地址 (或直接按回车退出): " manual_ip
+        if [ -n "$manual_ip" ]; then
+            server_ip="$manual_ip"
+        else
+            error "错误: 未输入可用的 IPv6 地址！"
+        fi
+    fi
+    info "设置成功！当前服务器使用的 IPv6 地址为: $server_ip"
+else
+    info "正在检测 IPv4 地址..."
+    server_ip=$(curl -s4m8 ip.sb -k | sed -n '1p')
+    if [ -z "$server_ip" ]; then
+        warning "未检测到可用的 IPv4 地址，尝试检测 IPv6..."
+        server_ip=$(curl -s6m8 ip.sb -k | sed -n '1p')
+        if [ -z "$server_ip" ]; then
+            error "错误: 未能检测到任何可用IP地址！请检查网络配置。"
+        fi
+        info "已自动回退到 IPv6，地址为: $server_ip"
+    else
+        info "检测成功！当前服务器的 IPv4 地址为: $server_ip"
+    fi
+fi
 
 #generate config
 cat > /root/sbox/config <<EOF
@@ -1794,7 +1843,7 @@ cat > /root/sbox/sbconfig_server.json << EOF
     "level": "info",
     "timestamp": true
   },
-  "inbounds": [
+  "inbounds":[
     {
       "sniff": true,
       "sniff_override_destination": true,
@@ -1802,7 +1851,7 @@ cat > /root/sbox/sbconfig_server.json << EOF
       "tag": "vless-in",
       "listen": "::",
       "listen_port": $reality_port,
-      "users": [
+      "users":[
         {
           "uuid": "$reality_uuid",
           "flow": "xtls-rprx-vision"
@@ -1818,7 +1867,7 @@ cat > /root/sbox/sbconfig_server.json << EOF
             "server_port": 443
           },
           "private_key": "$private_key",
-          "short_id": ["$short_id"]
+          "short_id":["$short_id"]
         }
       }
     },
@@ -1829,14 +1878,14 @@ cat > /root/sbox/sbconfig_server.json << EOF
         "tag": "hy2-in",
         "listen": "::",
         "listen_port": $hy_port,
-        "users": [
+        "users":[
             {
                 "password": "$hy_password"
             }
         ],
         "tls": {
             "enabled": true,
-            "alpn": [
+            "alpn":[
                 "h3"
             ],
             "certificate_path": "/root/sbox/self-cert/cert.pem",
@@ -1844,7 +1893,7 @@ cat > /root/sbox/sbconfig_server.json << EOF
         }
     }
   ],
-    "outbounds": [
+    "outbounds":[
         {
             "type": "direct",
             "tag": "direct"
@@ -1860,6 +1909,7 @@ EOF
 cat > /etc/systemd/system/sing-box.service <<EOF
 [Unit]
 After=network.target nss-lookup.target
+
 [Service]
 User=root
 WorkingDirectory=/root/sbox
@@ -1870,6 +1920,7 @@ ExecReload=/bin/kill -HUP \$MAINPID
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=infinity
+
 [Install]
 WantedBy=multi-user.target
 EOF
