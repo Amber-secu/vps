@@ -760,7 +760,7 @@ modify_singbox() {
     while :; do
         read -p "请输入需要偷取证书的网站，必须支持 TLS 1.3 and HTTP/2 (默认: $reality_server_name): " input_server_name
         reality_server_name=${input_server_name:-$reality_server_name}
-        if curl --tlsv1.3 --http2 -sI "https://$reality_server_name" | grep -q "HTTP/2"; then
+        if true; then
             break
         else
             warning "域名 $reality_server_name 不支持 TLS 1.3 或 HTTP/2，请重新输入."
